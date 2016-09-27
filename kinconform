@@ -11,9 +11,9 @@ from shutil import rmtree
 import pickle
 from glob import glob
 from copy import copy
+import warnings
 
-imp,model = pickle.load(open('imputer_and_model.p','r'))
-scaler = pickle.load(open('scaler.p','r'))
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def make_mapfile(aligned_seq, positions):
     mapping = {}
@@ -66,10 +66,11 @@ def get_sequence(infile):
             continue
     return results,posn
 
-def align_and_map_fasta(fasta,positions):
-    cmd = ['run_gaps', './profile/ePKf', fasta]
+def align_and_map_fasta(fasta, positions, basedir):
+    cmd = ['run_gaps', basedir+'profile/ePKf', fasta]
     temp = NamedTemporaryFile()
     call(cmd, stdout=temp, stderr=temp)
+    #call(cmd)
     temp.close()
     mapping = make_mapfile(fasta+'_aln.cma',positions)
     return mapping
@@ -122,8 +123,9 @@ def measure_one(pdb, mapp):
             vals.append(copy(temp))
     return vals
 
-def do_one(pdbs):
-    pdbs = glob('*.pdb')
+def do_one(args):
+    pdbs = args.pdbs
+    basedir = args.base
     #make fasta
     fasta = open('pdbs.fasta','w')
     positions = {}
@@ -135,7 +137,7 @@ def do_one(pdbs):
     fasta.close()
 
     #align and map files
-    mapping = align_and_map_fasta('pdbs.fasta',positions)
+    mapping = align_and_map_fasta('pdbs.fasta', positions, basedir)
 
     #measure all with mapping
     measures = []
@@ -143,7 +145,11 @@ def do_one(pdbs):
         tvals = measure_one(x, mapping[x])
         measures.append(tvals)
     measures = np.array(measures)
-    
+   
+    #load models
+    imp,model = pickle.load(open(basedir+'model/imputer_and_model.p','r'))
+    scaler = pickle.load(open(basedir+'model/scaler.p','r'))
+
     #impute and predict values
     imp_measures = imp.transform(measures)
     scaled_measures = scaler.transform(imp_measures)
@@ -156,7 +162,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Classify kinase crystal structures as active/inactive.")
     parser.add_argument('pdbs', nargs='+', help='pdbs for classification')
+    parser.add_argument('--base', action='store', default='./', help='base directory (with model & profile subdirectories)')
 
     args = parser.parse_args()
 
-    results = do_one(args.pdbs)
+    results = do_one(args)
+    results.sort()
+    rdict = { 1:'active', 0:'inactive' }
+
+    print 'pdb\tchain\tconformation'
+    for x,y in results:
+        print '\t'.join(['_'.join(x.split('_')[:-1]),x.split('_')[-1],rdict[y]])
+
