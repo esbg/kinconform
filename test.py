@@ -124,9 +124,8 @@ def measure_one(pdb, mapp):
             vals.append(copy(temp))
     return vals
 
-def do_one(direc):
+def do_one(pdbs):
     pdbs = glob('*.pdb')
-    #print pdbs
     #make fasta
     fasta = open('pdbs.fasta','w')
     positions = {}
@@ -136,8 +135,10 @@ def do_one(direc):
             fasta.write(y.format("fasta"))
         positions.update(posn)
     fasta.close()
+
     #align and map files
     mapping = align_and_map_fasta('pdbs.fasta',positions)
+
     #measure all with mapping
     measures = []
     for x in mapping:
@@ -153,12 +154,11 @@ def do_one(direc):
     return results
 
 if __name__ == '__main__':
-    if isfile('/tmp/kin_struct/kin_struct_todo.txt'):
-        need = []
-        ihand = open('/tmp/kin_struct/kin_struct_todo.txt','r')
-        for line in ihand:
-            need.append(line.strip())
-        for item in need:
-            do_one(item)
-        unlink('/tmp/kin_struct/kin_struct_todo.txt')
-    #measures = do_one('/tmp/tmp4AzyaR')
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Classify kinase crystal structures as active/inactive.")
+    parser.add_argument('pdbs', nargs='+', help='pdbs for classification')
+
+    args = parser.parse_args()
+
+    results = do_one(args.pdbs)
