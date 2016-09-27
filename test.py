@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import MDAnalysis
-from tempfile import NamedTemporaryFile, mkdtemp
+from tempfile import NamedTemporaryFile
 from subprocess import call
 from biocma import cma
 from os import chdir, getcwd, unlink
@@ -11,8 +11,6 @@ from shutil import rmtree
 import pickle
 from glob import glob
 from copy import copy
-import smtplib
-from email.mime.text import MIMEText
 
 imp,model = pickle.load(open('imputer_and_model.p','r'))
 scaler = pickle.load(open('scaler.p','r'))
