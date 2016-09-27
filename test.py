@@ -1,0 +1,164 @@
+#!/usr/bin/python
+
+import MDAnalysis
+from tempfile import NamedTemporaryFile, mkdtemp
+from subprocess import call
+from biocma import cma
+from os import chdir, getcwd, unlink
+from os.path import isfile
+import numpy as np
+from shutil import rmtree
+import pickle
+from glob import glob
+from copy import copy
+import smtplib
+from email.mime.text import MIMEText
+
+imp,model = pickle.load(open('imputer_and_model.p','r'))
+scaler = pickle.load(open('scaler.p','r'))
+
+def make_mapfile(aligned_seq, positions):
+    mapping = {}
+    block = cma.read(aligned_seq)
+    for sequence in block['sequences']:
+        seq = sequence['seq']
+        aln = [x for x in seq if (x.isupper() or x == '-')]
+        taln = [x.upper() for x in seq if x != '-']
+        posn = positions[sequence['id']]
+        pos,res = zip(*posn)
+        pos = list(pos)
+        j = 0
+        while list(res[j:j+5]) != taln[:5]:
+            j += 1
+            temp = min(pos)
+            pos.remove(temp)
+        i,j = 1,min(pos)
+        tmap = {}
+        for x in seq:
+            if x.islower():
+                pos.remove(j)
+                j = min(pos)
+            elif x.isupper():
+                tmap[i] = j
+                i += 1
+                pos.remove(j)
+                if len(pos) > 0:
+                    j = min(pos)
+            else:
+                i += 1
+        mapping[sequence['id']] = tmap
+    return mapping 
+
+def get_sequence(infile):
+    results = []
+    posn = {}
+    univ = MDAnalysis.Universe(infile)
+    prot = univ.select_atoms("protein")
+    chains = [x.name for x in prot.segments]
+    for x in chains:
+        temp_univ = prot.select_atoms("segid %s" % (x,))
+        try:
+            results.append(temp_univ.sequence(id="%s_%s" % (infile, x), description=""))
+            residues = temp_univ.sequence(format='string')
+            tpos = list(set(temp_univ.resids))
+            tpos.sort()
+            positions = zip(tpos,residues)
+            posn["%s_%s" % (infile, x)] = positions
+        except:
+            continue
+    return results,posn
+
+def align_and_map_fasta(fasta,positions):
+    cmd = ['run_gaps', './profile/ePKf', fasta]
+    temp = NamedTemporaryFile()
+    call(cmd, stdout=temp, stderr=temp)
+    temp.close()
+    mapping = make_mapfile(fasta+'_aln.cma',positions)
+    return mapping
+
+def measure_one(pdb, mapp):
+    feats = ['pd_CA_137_138_139_140', 'psi_141', 'pd_CA_140_141_142_143',
+    'psi_142', 'phi_139', 'psi_138','pd_CA_139_140_141_142','pd_CA_155_156_157_158', 
+    'pd_CA_138_139_140_141', 'pd_CA_135_136_137_138', 'pd_CA_136_137_138_139',
+    'pd_CA_154_155_156_157', 'phi_142', 'chi1_138', 'psi_157', 'pd_CA_156_157_158_159',
+    'psi_154', 'psi_139', 'pd_CA_134_135_136_137','psi_155', 'chi1_137', 'phi_157',
+    'psi_137', 'phi_154', 'psi_140', 'phi_140', 'phi_150']
+    ifile, chain = '_'.join(pdb.split('_')[:-1]), pdb.split('_')[-1]
+    universe = MDAnalysis.Universe(ifile)
+    univ = universe.select_atoms("protein and segid %s" % (chain,)) 
+    vals,temp = [],[]
+    #if wanted features are supplied, only measure those features
+    for x in feats:
+        row = x.split('_')
+        #dihedrals
+        if len(row) == 2:
+            temp = np.nan
+            if int(row[1]) in mapp:
+                rvals = [a.resid for a in univ.residues]
+                rind = rvals.index(mapp[int(row[1])])
+                res = univ.residues[rind]
+                if row[0] == 'phi':
+                    sele = res.phi_selection()
+                elif row[0] == 'psi':
+                    sele = res.psi_selection()
+                elif row[0] == 'chi1':
+                    sele = res.chi1_selection()
+                if sele is not None and len(sele) == 4:
+                    temp = sele.dihedral.dihedral()
+                #print 'dihedral:',sele,temp
+            vals.append(copy(temp))
+        #pseudodihedrals
+        elif len(row) == 6:
+            atom = row[1]
+            residues = [int(x) for x in row[2:]]
+            temp = np.nan
+            if residues[0] in mapp:
+                ta = univ.select_atoms("resid %d and name %s" % (mapp[residues[0]],atom))
+                for res in residues[1:]:
+                    if res in mapp:
+                        ta += univ.select_atoms("resid %d and name %s" % (mapp[res],atom))
+                if len(ta) == 4:
+                    tb = ta.dihedral
+                    #temp = tb.dihedral()
+                    temp = tb.value()
+            vals.append(copy(temp))
+    return vals
+
+def do_one(direc):
+    pdbs = glob('*.pdb')
+    #print pdbs
+    #make fasta
+    fasta = open('pdbs.fasta','w')
+    positions = {}
+    for x in pdbs:
+        temp,posn = get_sequence(x)
+        for y in temp:
+            fasta.write(y.format("fasta"))
+        positions.update(posn)
+    fasta.close()
+    #align and map files
+    mapping = align_and_map_fasta('pdbs.fasta',positions)
+    #measure all with mapping
+    measures = []
+    for x in mapping:
+        tvals = measure_one(x, mapping[x])
+        measures.append(tvals)
+    measures = np.array(measures)
+    
+    #impute and predict values
+    imp_measures = imp.transform(measures)
+    scaled_measures = scaler.transform(imp_measures)
+    predictions = model.predict(scaled_measures)
+    results = zip(mapping.keys(),predictions)
+    return results
+
+if __name__ == '__main__':
+    if isfile('/tmp/kin_struct/kin_struct_todo.txt'):
+        need = []
+        ihand = open('/tmp/kin_struct/kin_struct_todo.txt','r')
+        for line in ihand:
+            need.append(line.strip())
+        for item in need:
+            do_one(item)
+        unlink('/tmp/kin_struct/kin_struct_todo.txt')
+    #measures = do_one('/tmp/tmp4AzyaR')
