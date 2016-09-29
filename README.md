@@ -10,6 +10,8 @@ The output is tab-delimited and displays the conformation (active/inactive) for 
 ------
 ./kinconform XXX.pdb YYY.pdb ZZZ.pdb > a.out
 
+To run test structures, simply `cd test` and `make all`.
+
 Note: the profile and model directories should be colocated with kinconform. To install, add a symbolic link to kinconform from your bin/ directory.
 #Dependencies
 ------
