@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 import MDAnalysis
 from tempfile import NamedTemporaryFile
@@ -12,6 +12,14 @@ import pickle
 from glob import glob
 from copy import copy
 import warnings
+
+canonical_inverse_aa_codes = {
+    'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E',
+    'PHE': 'F', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
+    'LYS': 'K', 'LEU': 'L', 'MET': 'M', 'ASN': 'N',
+    'PRO': 'P', 'GLN': 'Q', 'ARG': 'R', 'SER': 'S',
+    'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'}
+
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -52,18 +60,30 @@ def get_sequence(infile):
     posn = {}
     univ = MDAnalysis.Universe(infile)
     prot = univ.select_atoms("protein")
-    chains = [x.name for x in prot.segments]
+    #chains = [x.name for x in prot.segments]
+    chains = [x.segid for x in prot.segments]
     for x in chains:
         temp_univ = prot.select_atoms("segid %s" % (x,))
-        try:
-            results.append(temp_univ.sequence(id="%s_%s" % (infile, x), description=""))
-            residues = temp_univ.sequence(format='string')
+        if 1 == 1:
+        #try:
+            #print dir(temp_univ.residues)
+            #results.append(temp_univ.residues)
+            #results.append(temp_univ.sequence(id="%s_%s" % (infile, x), description=""))
+            #residues = temp_univ.sequence(format='string')
+            residues = temp_univ.residues
+            #sequence.append(canonical_inverse_aa_codes[res.resname])
+            results.append([">%s_%s" %(infile,x), residues])
             tpos = list(set(temp_univ.resids))
             tpos.sort()
-            positions = zip(tpos,residues)
+            seq = []
+            for res in residues:
+                seq.append(canonical_inverse_aa_codes[res.resname])
+            seq = ''.join(seq)
+            #positions = zip(tpos,residues)
+            positions = zip(tpos,seq)
             posn["%s_%s" % (infile, x)] = positions
-        except:
-            continue
+        #except:
+        #    continue
     return results,posn
 
 def align_and_map_fasta(fasta, positions, basedir):
@@ -132,7 +152,13 @@ def do_one(args):
     for x in pdbs:
         temp,posn = get_sequence(x)
         for y in temp:
-            fasta.write(y.format("fasta"))
+            seqid = y[0]
+            res_seq = y[1]
+            fasta_seq = []
+            for res in res_seq:
+                fasta_seq.append(canonical_inverse_aa_codes[res.resname])
+            fasta.write("%s\n" %(seqid))
+            fasta.write("%s\n" %(''.join(fasta_seq)))
         positions.update(posn)
     fasta.close()
 
