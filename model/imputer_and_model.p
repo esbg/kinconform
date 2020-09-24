@@ -2,8 +2,8 @@
 ccopy_reg
 _reconstructor
 p1
-(csklearn.preprocessing.imputation
-Imputer
+(csklearn.impute
+SimpleImputer
 p2
 c__builtin__
 object

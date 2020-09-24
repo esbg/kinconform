@@ -60,30 +60,18 @@ def get_sequence(infile):
     posn = {}
     univ = MDAnalysis.Universe(infile)
     prot = univ.select_atoms("protein")
-    #chains = [x.name for x in prot.segments]
     chains = [x.segid for x in prot.segments]
     for x in chains:
         temp_univ = prot.select_atoms("segid %s" % (x,))
-        if 1 == 1:
-        #try:
-            #print dir(temp_univ.residues)
-            #results.append(temp_univ.residues)
-            #results.append(temp_univ.sequence(id="%s_%s" % (infile, x), description=""))
-            #residues = temp_univ.sequence(format='string')
-            residues = temp_univ.residues
-            #sequence.append(canonical_inverse_aa_codes[res.resname])
-            results.append([">%s_%s" %(infile,x), residues])
+        try:
+            results.append(temp_univ.residues.sequence(id="%s_%s" % (infile, x), description=""))
+            residues = temp_univ.residues.sequence(format='string')
             tpos = list(set(temp_univ.resids))
             tpos.sort()
-            seq = []
-            for res in residues:
-                seq.append(canonical_inverse_aa_codes[res.resname])
-            seq = ''.join(seq)
-            #positions = zip(tpos,residues)
-            positions = zip(tpos,seq)
+            positions = zip(tpos,residues)
             posn["%s_%s" % (infile, x)] = positions
-        #except:
-        #    continue
+        except:
+            continue
     return results,posn
 
 def align_and_map_fasta(fasta, positions, basedir):
@@ -152,13 +140,7 @@ def do_one(args):
     for x in pdbs:
         temp,posn = get_sequence(x)
         for y in temp:
-            seqid = y[0]
-            res_seq = y[1]
-            fasta_seq = []
-            for res in res_seq:
-                fasta_seq.append(canonical_inverse_aa_codes[res.resname])
-            fasta.write("%s\n" %(seqid))
-            fasta.write("%s\n" %(''.join(fasta_seq)))
+            fasta.write(y.format("fasta"))
         positions.update(posn)
     fasta.close()
 
@@ -173,14 +155,23 @@ def do_one(args):
     measures = np.array(measures)
    
     #load models
-    imp,model = pickle.load(open(basedir+'model/imputer_and_model.p','r'))
-    scaler = pickle.load(open(basedir+'model/scaler.p','r'))
+    imp,model = pickle.load(open(basedir+'model/imputer_and_model.p','rb'), encoding='latin1')
+    scaler = pickle.load(open(basedir+'model/scaler.p','rb'), encoding='latin1')
+
+    # Original model was develop using 0.18 version
+    # This makes the model compatible with modern versions
+    imp.missing_values = np.nan
+    imp.n_features_in_ = 27
+    imp.add_indicator = False
+
+    scaler.n_features_in_ = 27
 
     #impute and predict values
     imp_measures = imp.transform(measures)
     scaled_measures = scaler.transform(imp_measures)
     predictions = model.predict(scaled_measures)
-    results = zip(mapping.keys(),predictions)
+    predictions_prob = model.predict_proba(scaled_measures)
+    results = zip(mapping.keys(),predictions,predictions_prob)
     return results
 
 if __name__ == '__main__':
@@ -192,11 +183,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    results = do_one(args)
+    results = list(do_one(args))
     results.sort()
     rdict = { 1:'active', 0:'inactive' }
 
-    print 'pdb\tchain\tconformation'
-    for x,y in results:
-        print '\t'.join(['_'.join(x.split('_')[:-1]),x.split('_')[-1],rdict[y]])
+    print ('pdb\tchain\tconformation\t[prob_inactive prob_active]')
+    for x,y,z in results:
+        print ('\t'.join(['_'.join(x.split('_')[:-1]),x.split('_')[-1],rdict[y],str(z)]))
 
