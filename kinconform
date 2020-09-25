@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 import MDAnalysis
 from tempfile import NamedTemporaryFile
@@ -12,6 +12,7 @@ import pickle
 from glob import glob
 from copy import copy
 import warnings
+
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -52,12 +53,12 @@ def get_sequence(infile):
     posn = {}
     univ = MDAnalysis.Universe(infile)
     prot = univ.select_atoms("protein")
-    chains = [x.name for x in prot.segments]
+    chains = [x.segid for x in prot.segments]
     for x in chains:
         temp_univ = prot.select_atoms("segid %s" % (x,))
         try:
-            results.append(temp_univ.sequence(id="%s_%s" % (infile, x), description=""))
-            residues = temp_univ.sequence(format='string')
+            results.append(temp_univ.residues.sequence(id="%s_%s" % (infile, x), description=""))
+            residues = temp_univ.residues.sequence(format='string')
             tpos = list(set(temp_univ.resids))
             tpos.sort()
             positions = zip(tpos,residues)
@@ -147,14 +148,23 @@ def do_one(args):
     measures = np.array(measures)
    
     #load models
-    imp,model = pickle.load(open(basedir+'model/imputer_and_model.p','r'))
-    scaler = pickle.load(open(basedir+'model/scaler.p','r'))
+    imp,model = pickle.load(open(basedir+'model/imputer_and_model.p','rb'), encoding='latin1')
+    scaler = pickle.load(open(basedir+'model/scaler.p','rb'), encoding='latin1')
+
+    # Original model was develop using 0.18 version
+    # This makes the model compatible with modern versions
+    imp.missing_values = np.nan
+    imp.n_features_in_ = 27
+    imp.add_indicator = False
+
+    scaler.n_features_in_ = 27
 
     #impute and predict values
     imp_measures = imp.transform(measures)
     scaled_measures = scaler.transform(imp_measures)
     predictions = model.predict(scaled_measures)
-    results = zip(mapping.keys(),predictions)
+    predictions_prob = model.predict_proba(scaled_measures)
+    results = zip(mapping.keys(),predictions,predictions_prob)
     return results
 
 if __name__ == '__main__':
@@ -166,11 +176,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    results = do_one(args)
+    results = list(do_one(args))
     results.sort()
     rdict = { 1:'active', 0:'inactive' }
 
-    print 'pdb\tchain\tconformation'
-    for x,y in results:
-        print '\t'.join(['_'.join(x.split('_')[:-1]),x.split('_')[-1],rdict[y]])
+    print ('pdb\tchain\tconformation\t[prob_inactive prob_active]')
+    for x,y,z in results:
+        print ('\t'.join(['_'.join(x.split('_')[:-1]),x.split('_')[-1],rdict[y],str(z)]))
 
